@@ -128,7 +128,7 @@ execute (DoLoop body) = do
 
 -- Получить текущий индекс цикла
 execute I = modifyStack $ \case
-  (i:xs) -> i : i : xs
+  xs@(i:_) -> i : xs
   _ -> throwError "No loop index found"
 
 -- Универсальная функция для выполнения бинарных операций
@@ -147,27 +147,44 @@ parse input = concatMap parseWord (words input)
 
 parseWord :: String -> [Command]
 parseWord word
-  | Just n <- readMaybe word = [Push n]  -- Число
+  | Just n <- readMaybe word = [Push n]
   | word == "+"   = [Add]
   | word == "-"   = [Sub]
   | word == "*"   = [Mul]
   | word == "/"   = [Div]
   | word == "MOD" = [Mod]
-  | word == "DUP" = [Dup]
+  | word == "DUP"  = [Dup]
   | word == "DROP" = [Drop]
   | word == "SWAP" = [Swap]
   | word == "OVER" = [Over]
   | word == "ROT"  = [Rot]
-  | word == "="    = [Equals]
-  | word == "<"    = [Less]
-  | word == ">"    = [Greater]
-  | word == "DO"   = [DoLoop []]
-  | word == "LOOP" = []  -- Конец цикла
-  | word == "I"    = [I]
-  | word == "."    = [Dot]
-  | word == "EMIT" = [Emit]
-  | word == "CR"   = [CR]
-  | otherwise      = [Word word []]  -- Новое слово
+  | word == "="     = [Equals]
+  | word == "<"     = [Less]
+  | word == ">"     = [Greater]
+  | word == "AND"   = [And]
+  | word == "OR"    = [Or]
+  | word == "NOT"   = [Invert]
+  | word == "DO"    = [DoLoop []]
+  | word == "LOOP"  = []
+  | word == "I"     = [I]
+  | word == "VARIABLE" = [Variable ""]
+  | word == "@"        = [Get]
+  | word == "!"        = [Set]
+  | word == "CONSTANT" = [Constant "" 0]
+  | word == "."         = [Dot]
+  | word == "EMIT"      = [Emit]
+  | word == "CR"        = [CR]
+  | "STRING:" `isPrefixOf` word = [DotString (drop 7 word)]
+  | word == "\\" = [Comment]
+  | otherwise = [Word word []]
+
+-- Запуск программы
+runColon :: String -> Either String StateColon
+runColon input = evalState (runExceptT (interpret input)) initState
+
+initState :: StateColon
+initState = StateColon [] Map.empty Map.empty
+
 
 main :: IO ()
 main = do
@@ -177,9 +194,6 @@ main = do
   case result of
     Left err -> putStrLn $ "Ошибка: " ++ err
     Right st -> putStrLn $ "Стек: " ++ show (stack st)
-
-initState :: StateColon
-initState = StateColon [] Map.empty Map.empty
 
 
 testPrograms :: [String]
