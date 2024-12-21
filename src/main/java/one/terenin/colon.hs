@@ -1,4 +1,9 @@
+{-# LANGUAGE LambdaCase #-}
+
 import Data.Map (Map)
+import Data.Bits ( (.&.), (.|.) )
+import Control.Monad ( forM_ )
+import Data.List ( isPrefixOf )
 import qualified Data.Map as Map
 import Control.Monad.State
 import Control.Monad.Except
@@ -40,7 +45,7 @@ data StateColon = StateColon
   }
 
 -- Монада для обработки состояния и ошибок
-type ColonM = ExceptT String (State StateColon)
+type ColonM = ExceptT String (StateT StateColon IO)
 
 -- Главная функция интерпретации программы
 interpret :: String -> ColonM ()
@@ -64,38 +69,38 @@ execute Greater = binaryOp (\x y -> if x > y then 1 else 0)
 execute And    = binaryOp (.&.)
 execute Or     = binaryOp (.|.)
 execute Invert = modifyStack $ \case
-  (x:xs) -> (if x == 0 then 1 else 0) : xs
-  _      -> throwError "Stack underflow"
+  (x : xs) -> (if x == 0 then 1 else 0) : xs
+  _ -> undefined
 
 -- Манипуляции со стеком
 execute Dup = modifyStack $ \case
   (x:xs) -> x : x : xs
-  _ -> throwError "Stack underflow"
+  _ -> undefined
 
 execute Drop = modifyStack $ \case
   (_:xs) -> xs
-  _ -> throwError "Stack underflow"
+  _ -> undefined
 
 execute Swap = modifyStack $ \case
   (x:y:xs) -> y : x : xs
-  _ -> throwError "Stack underflow"
+  _ -> undefined
 
 execute Over = modifyStack $ \case
   (x:y:xs) -> y : x : y : xs
-  _ -> throwError "Stack underflow"
+  _ -> undefined
 
 execute Rot = modifyStack $ \case
   (x:y:z:xs) -> y : z : x : xs
-  _ -> throwError "Stack underflow"
+  _ -> undefined
 
 -- Ввод-вывод
 execute Dot = modifyStack $ \case
   (x:xs) -> unsafePerformIO (print x) `seq` xs
-  _ -> throwError "Stack underflow"
+  _ -> undefined
 
 execute Emit = modifyStack $ \case
   (x:xs) -> unsafePerformIO (putChar (toEnum x)) `seq` xs
-  _ -> throwError "Stack underflow"
+  _ -> undefined
 
 execute CR = liftIO $ putStrLn ""
 
@@ -110,7 +115,7 @@ execute (If thenBranch elseBranch) = do
       if x /= 0
         then mapM_ execute thenBranch
         else mapM_ execute elseBranch
-    _ -> throwError "Stack underflow"
+    _ -> undefined
 
 -- Обработка цикла DO ... LOOP
 execute (DoLoop body) = do
@@ -129,17 +134,20 @@ execute (DoLoop body) = do
 -- Получить текущий индекс цикла
 execute I = modifyStack $ \case
   xs@(i:_) -> i : xs
-  _ -> throwError "No loop index found"
+  _ -> undefined
 
 -- Универсальная функция для выполнения бинарных операций
 binaryOp :: (Int -> Int -> Int) -> ColonM ()
 binaryOp op = modifyStack $ \case
   (x:y:rest) -> op y x : rest
-  _ -> throwError "Stack underflow"
+  _ -> undefined
 
 -- Изменение состояния стека
 modifyStack :: (Stack -> Stack) -> ColonM ()
-modifyStack f = modify $ \st -> st { stack = f (stack st) }
+modifyStack f = do
+  stack <- gets stack
+  let newStack = f stack
+  modify $ \s -> s { stack = newStack }
 
 -- Парсер программы: преобразует строку в список команд
 parse :: String -> [Command]
@@ -168,8 +176,8 @@ parseWord word
   | word == "LOOP"  = []
   | word == "I"     = [I]
   | word == "VARIABLE" = [Variable ""]
-  | word == "@"        = [Get]
-  | word == "!"        = [Set]
+  | word == "@"        = [Get ""]
+  | word == "!"        = [Set ""]
   | word == "CONSTANT" = [Constant "" 0]
   | word == "."         = [Dot]
   | word == "EMIT"      = [Emit]
@@ -179,8 +187,12 @@ parseWord word
   | otherwise = [Word word []]
 
 -- Запуск программы
-runColon :: String -> Either String StateColon
-runColon input = evalState (runExceptT (interpret input)) initState
+runColon :: String -> IO (Either String StateColon)
+runColon input = do
+  (result, finalState) <- runStateT (runExceptT (interpret input)) initState
+  return (case result of
+    Left err -> Left err
+    Right () -> Right finalState)
 
 initState :: StateColon
 initState = StateColon [] Map.empty Map.empty
@@ -188,12 +200,13 @@ initState = StateColon [] Map.empty Map.empty
 
 main :: IO ()
 main = do
-  putStrLn "Введите программу Colon:"
-  input <- getLine
-  let result = evalState (runExceptT (interpret input)) initState
+  putStrLn "Введите программу:"
+  prog <- getLine
+  result <- runColon prog
   case result of
     Left err -> putStrLn $ "Ошибка: " ++ err
     Right st -> putStrLn $ "Стек: " ++ show (stack st)
+
 
 
 testPrograms :: [String]
@@ -207,8 +220,8 @@ testPrograms =
   ]
 
 -- Функция запуска теста
-runTest :: String -> IO ()
-runTest prog =
-  case runColon prog of
-    Left err -> putStrLn $ "Ошибка: " ++ err
-    Right st -> putStrLn $ "Стек: " ++ show (stack st)
+--runTest :: String -> IO ()
+--runTest prog =
+--  case runColon prog of
+--    Left err -> putStrLn $ "Ошибка: " ++ err
+--    Right st -> putStrLn $ "Стек: " ++ show (stack st)
