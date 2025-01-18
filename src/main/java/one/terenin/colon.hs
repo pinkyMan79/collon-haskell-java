@@ -131,7 +131,7 @@ execute (DoLoop body) = do
     (end : start : rest) -> do
       modifyStack (const (Right rest))
       forM_ [start .. end - 1] $ \i -> do
-        modifyStack (Right . (i :))
+        modifyStack (Right . (i+1 :))
         mapM_ execute body
         modifyStack $ \s -> Right (tail s)
     _ -> throwError "DO requires two values on the stack"
@@ -156,10 +156,12 @@ execute (Get name) = do
 execute (Constant name value) = modify $ \s -> s { dictionary = Map.insert name [Push value] (dictionary s) }
 execute (Word name wordDef) = modify $ \s -> s { dictionary = Map.insert name wordDef (dictionary s) }
 execute (Call name) = do
-  dict <- gets dictionary
-  case Map.lookup name dict of
-    Just wordDef -> mapM_ execute wordDef
-    Nothing -> throwError $ "Word " ++ name ++ " not found"
+  mem <- gets memory
+  case Map.lookup name mem of
+    Just wordDef -> do
+      modifyStack (Right . (wordDef :))
+    Nothing -> do
+      throwError $ "Word " ++ name ++ " not found"
 execute Comment = return ()
 execute (NewArray n) = modifyStack $ \case
   stack -> Right (go n stack)
@@ -230,15 +232,15 @@ parse = fst . parseCommands . words
     parseCommands [] = ([], [])
     parseCommands ("IF" : rest) =
       let (thenBranch, afterThen) = parseCommands rest
-          (elseBranch, afterElse) = case afterThen of
-            ("ELSE" : r) -> parseCommands r
+          (elseBranch, afterElse) = case dropWhile (/= "ELSE") afterThen of
+            " ELSE " : r -> parseCommands r
             _ -> ([], afterThen)
-          remaining = case afterElse of
-            ("THEN" : r) -> r
+          remaining = case dropWhile (/= "THEN ") afterElse of
+            " THEN " : r -> r
             _ -> error "Unmatched IF/THEN"
        in (If thenBranch elseBranch : fst (parseCommands remaining), snd (parseCommands remaining))
-    parseCommands ("ELSE" : _) = ([], [])
-    parseCommands ("THEN" : _) = ([], [])
+    parseCommands ("ELSE" : rest) = parseCommands rest
+    parseCommands ("THEN" : rest) = parseCommands rest
     parseCommands ("VARIABLE" : varName : rest) = (Variable varName : fst (parseCommands rest), snd (parseCommands rest))
     parseCommands ("@" : varName : rest) = (Get varName : fst (parseCommands rest), snd (parseCommands rest))
     parseCommands ("!" : varName : rest) = (Set varName : fst (parseCommands rest), snd (parseCommands rest))
@@ -281,30 +283,26 @@ runColon input = do
 initState :: StateColon
 initState = StateColon [] Map.empty Map.empty
 
-{-main :: IO ()
+main :: IO ()
 main = do
-  let testCases = [
-      "5 10 + .",
-      "5 0 > IF 1 ELSE 0 THEN .",
-      "1 5 DO I . LOOP",
-      "VARIABLE x 42 x ! x @ .",
-      "3 4 + 5 * .",
-      "10 20 > IF 100 ELSE 200 THEN .",
-      "NEWARRAY 5 1 2 3 4 5 SETINDEX 0 INDEX .",
-      "BEGIN 1 10 < UNTIL"
-    ]
+  let testCases = ["5 10 + .","1 2 3 + ","1 2 3 4 DUP","1 2 . . 3 . 4","VARIABLE x 42 x","5 0 >","5 0 > 1 ELSE 0 THEN .","3 4 + 5 * .","10 20 > 100 ELSE 200 THEN ."]
   forM_ testCases $ \testCase -> do
     putStrLn $ "Executing: " ++ testCase
     result <- runColon testCase
     case result of
       Left err -> putStrLn $ "Error: " ++ err
-      Right st -> putStrLn $ "Stack: " ++ show (stack st)-}
+      Right st -> putStrLn $ "Stack: " ++ show (stack st)
 
-main :: IO ()
-main = do
-  putStrLn "Enter program:"
-  prog <- getLine
-  result <- runColon prog
-  case result of
-    Left err -> putStrLn $ "Error: " ++ err
-    Right st -> putStrLn $ "Stack: " ++ show (stack st)
+{-
+MORE test cases
+      "5 10 + .",
+      "1 2 3 + ",
+      "1 2 3 4 DUP",
+      "1 2 . . 3 . 4",
+      "VARIABLE x 42 x",
+      "5 0 >",
+      "5 0 > 1 ELSE 0 THEN .",
+      "3 4 + 5 * .",
+      "10 20 > 100 ELSE 200 THEN .",
+      "NEWARRAY 1 1 2 3 4 5 SETINDEX 0 INDEX .",
+      "BEGIN 1 10 < UNTIL"-}
